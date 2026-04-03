@@ -1,6 +1,6 @@
 from django.test import TestCase
 from django.db import IntegrityError
-from inventory.models import Category, Product
+from inventory.models import Category, Product, Location, Supplier
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -167,3 +167,139 @@ class ProductAPITest(TestCase):
         }
         response = self.client.post("/api/products/", data)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class LocationModelTest(TestCase):
+    def test_create_location(self):
+        """A location can be created with all fields."""
+        location = Location.objects.create(
+            name="A-03-02-04",
+            zone="A",
+            aisle="03",
+            rack="02",
+            shelf="04",
+        )
+        self.assertEqual(location.name, "A-03-02-04")
+        self.assertEqual(str(location), "A-03-02-04")
+        self.assertTrue(location.is_active)
+
+    def test_location_name_is_unique(self):
+        """Two locations cannot have the same name."""
+        Location.objects.create(name="A-01-01-01", zone="A")
+        with self.assertRaises(IntegrityError):
+            Location.objects.create(name="A-01-01-01", zone="A")
+
+    def test_location_with_zone_only(self):
+        """A location can be created with just a name and zone."""
+        location = Location.objects.create(
+            name="Receiving Dock",
+            zone="Receiving",
+        )
+        self.assertEqual(location.aisle, "")
+        self.assertEqual(location.rack, "")
+
+
+class SupplierModelTest(TestCase):
+    def test_create_supplier(self):
+        """A supplier can be created with all fields."""
+        supplier = Supplier.objects.create(
+            name="Acme Corp",
+            code="SUP-001",
+            contact_name="John Smith",
+            email="john@acme.com",
+            phone="+1-555-0100",
+        )
+        self.assertEqual(supplier.name, "Acme Corp")
+        self.assertEqual(str(supplier), "SUP-001 — Acme Corp")
+        self.assertTrue(supplier.is_active)
+
+    def test_supplier_code_is_unique(self):
+        """Two suppliers cannot share the same code."""
+        Supplier.objects.create(name="Acme Corp", code="SUP-001")
+        with self.assertRaises(IntegrityError):
+            Supplier.objects.create(name="Other Corp", code="SUP-001")
+
+    def test_contact_fields_are_optional(self):
+        """A supplier can be created with just name and code."""
+        supplier = Supplier.objects.create(name="MinimalCo", code="SUP-002")
+        self.assertEqual(supplier.contact_name, "")
+        self.assertEqual(supplier.email, "")
+        self.assertEqual(supplier.phone, "")
+
+
+class LocationAPITest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.location = Location.objects.create(
+            name="A-01-01-01",
+            zone="A",
+            aisle="01",
+            rack="01",
+            shelf="01",
+        )
+
+    def test_list_locations(self):
+        """GET /api/locations/ returns a list of locations."""
+        response = self.client.get("/api/locations/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_create_location(self):
+        """POST /api/locations/ creates a new location."""
+        data = {"name": "B-02-01-01", "zone": "B", "aisle": "02"}
+        response = self.client.post("/api/locations/", data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Location.objects.count(), 2)
+
+    def test_create_location_without_zone_fails(self):
+        """POST /api/locations/ without a zone returns 400."""
+        data = {"name": "No Zone"}
+        response = self.client.post("/api/locations/", data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_duplicate_name_fails(self):
+        """POST /api/locations/ with a duplicate name returns 400."""
+        data = {"name": "A-01-01-01", "zone": "A"}
+        response = self.client.post("/api/locations/", data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class SupplierAPITest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.supplier = Supplier.objects.create(
+            name="Acme Corp",
+            code="SUP-001",
+            email="info@acme.com",
+        )
+
+    def test_list_suppliers(self):
+        """GET /api/suppliers/ returns a list of suppliers."""
+        response = self.client.get("/api/suppliers/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+
+    def test_create_supplier(self):
+        """POST /api/suppliers/ creates a new supplier."""
+        data = {"name": "Global Parts", "code": "SUP-002"}
+        response = self.client.post("/api/suppliers/", data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Supplier.objects.count(), 2)
+
+    def test_create_supplier_without_code_fails(self):
+        """POST /api/suppliers/ without a code returns 400."""
+        data = {"name": "No Code Inc"}
+        response = self.client.post("/api/suppliers/", data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_create_duplicate_code_fails(self):
+        """POST /api/suppliers/ with a duplicate code returns 400."""
+        data = {"name": "Other Corp", "code": "SUP-001"}
+        response = self.client.post("/api/suppliers/", data)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_retrieve_supplier(self):
+        """GET /api/suppliers/<id>/ returns a single supplier."""
+        response = self.client.get(f"/api/suppliers/{self.supplier.id}/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["name"], "Acme Corp")
+        self.assertEqual(response.data["email"], "info@acme.com")

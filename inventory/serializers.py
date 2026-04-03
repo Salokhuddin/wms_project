@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from inventory.models import Category, Product
+from inventory.models import Category, Product, Location, Supplier
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -23,6 +23,41 @@ class ProductSerializer(serializers.ModelSerializer):
             "category_name",
             "unit_of_measure",
             "weight",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+class LocationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Location
+        fields = [
+            "id",
+            "name",
+            "zone",
+            "aisle",
+            "rack",
+            "shelf",
+            "bin",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+
+class SupplierSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Supplier
+        fields = [
+            "id",
+            "name",
+            "code",
+            "contact_name",
+            "email",
+            "phone",
+            "address",
+            "is_active",
             "created_at",
             "updated_at",
         ]
