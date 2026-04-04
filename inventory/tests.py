@@ -1,6 +1,6 @@
 from django.test import TestCase
 from django.db import IntegrityError
-from inventory.models import Category, Product, Location, Supplier
+from inventory.models import Category, Product, Location, Supplier, Inventory
 from rest_framework.test import APIClient
 from rest_framework import status
 
@@ -303,3 +303,211 @@ class SupplierAPITest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["name"], "Acme Corp")
         self.assertEqual(response.data["email"], "info@acme.com")
+
+
+class InventoryModelTest(TestCase):
+    def setUp(self):
+        self.category = Category.objects.create(name="Electronics")
+        self.product = Product.objects.create(
+            name="Wireless Mouse",
+            sku="WM-001",
+            category=self.category,
+        )
+        self.location = Location.objects.create(
+            name="A-01-01-01",
+            zone="A",
+            aisle="01",
+            rack="01",
+            shelf="01",
+        )
+
+    def test_create_inventory_record(self):
+        """An inventory record links a product to a location with a quantity."""
+        record = Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        self.assertEqual(record.quantity, 50)
+        self.assertEqual(str(record), "WM-001 @ A-01-01-01: 50")
+
+    def test_default_quantity_is_zero(self):
+        """Quantity defaults to zero if not specified."""
+        record = Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+        )
+        self.assertEqual(record.quantity, 0)
+
+    def test_unique_product_location_pair(self):
+        """Cannot create two records for the same product-location pair."""
+        Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        with self.assertRaises(IntegrityError):
+            Inventory.objects.create(
+                product=self.product,
+                location=self.location,
+                quantity=10,
+            )
+
+    def test_same_product_different_locations(self):
+        """Same product can exist in multiple locations."""
+        location_b = Location.objects.create(name="B-01-01-01", zone="B")
+        Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        Inventory.objects.create(
+            product=self.product,
+            location=location_b,
+            quantity=30,
+        )
+        self.assertEqual(Inventory.objects.filter(product=self.product).count(), 2)
+
+    def test_different_products_same_location(self):
+        """Different products can share the same location."""
+        product_b = Product.objects.create(
+            name="Keyboard",
+            sku="KB-001",
+            category=self.category,
+        )
+        Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        Inventory.objects.create(
+            product=product_b,
+            location=self.location,
+            quantity=25,
+        )
+        self.assertEqual(Inventory.objects.filter(location=self.location).count(), 2)
+
+    def test_product_protected_on_delete(self):
+        """Cannot delete a product that has inventory records."""
+        Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        with self.assertRaises(Exception):
+            self.product.delete()
+
+    def test_location_protected_on_delete(self):
+        """Cannot delete a location that has inventory records."""
+        Inventory.objects.create(
+            product=self.product,
+            location=self.location,
+            quantity=50,
+        )
+        with self.assertRaises(Exception):
+            self.location.delete()
+
+class InventoryAPITest(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(name="Electronics")
+        self.product_a = Product.objects.create(
+            name="Wireless Mouse",
+            sku="WM-001",
+            category=self.category,
+        )
+        self.product_b = Product.objects.create(
+            name="Keyboard",
+            sku="KB-001",
+            category=self.category,
+        )
+        self.location_a = Location.objects.create(name="A-01-01-01", zone="A")
+        self.location_b = Location.objects.create(name="B-01-01-01", zone="B")
+
+        Inventory.objects.create(
+            product=self.product_a,
+            location=self.location_a,
+            quantity=50,
+        )
+        Inventory.objects.create(
+            product=self.product_a,
+            location=self.location_b,
+            quantity=30,
+        )
+        Inventory.objects.create(
+            product=self.product_b,
+            location=self.location_a,
+            quantity=25,
+        )
+
+    def test_list_inventory(self):
+        """GET /api/inventory/ returns all inventory records."""
+        response = self.client.get("/api/inventory/")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 3)
+
+    def test_create_inventory(self):
+        """POST /api/inventory/ creates a new inventory record."""
+        location_c = Location.objects.create(name="C-01-01-01", zone="C")
+        data = {
+            "product": self.product_a.id,
+            "location": location_c.id,
+            "quantity": 10,
+        }
+        response = self.client.post("/api/inventory/", data)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(Inventory.objects.count(), 4)
+
+    def test_by_product_returns_correct_locations(self):
+        """by-product endpoint returns all locations holding a product."""
+        response = self.client.get(
+            f"/api/inventory/by-product/{self.product_a.id}/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        location_names = [r["location_name"] for r in response.data]
+        self.assertIn("A-01-01-01", location_names)
+        self.assertIn("B-01-01-01", location_names)
+
+    def test_by_product_excludes_zero_quantity(self):
+        """by-product endpoint excludes locations with zero quantity."""
+        Inventory.objects.filter(
+            product=self.product_a,
+            location=self.location_b,
+        ).update(quantity=0)
+        response = self.client.get(
+            f"/api/inventory/by-product/{self.product_a.id}/"
+        )
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["location_name"], "A-01-01-01")
+
+    def test_by_product_not_found(self):
+        """by-product endpoint returns 404 for nonexistent product."""
+        response = self.client.get("/api/inventory/by-product/9999/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_by_location_returns_correct_products(self):
+        """by-location endpoint returns all products at a location."""
+        response = self.client.get(
+            f"/api/inventory/by-location/{self.location_a.id}/"
+        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 2)
+        skus = [r["product_sku"] for r in response.data]
+        self.assertIn("WM-001", skus)
+        self.assertIn("KB-001", skus)
+
+    def test_by_location_not_found(self):
+        """by-location endpoint returns 404 for nonexistent location."""
+        response = self.client.get("/api/inventory/by-location/9999/")
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_response_includes_readable_names(self):
+        """Inventory response includes product and location names."""
+        response = self.client.get(
+            f"/api/inventory/by-product/{self.product_a.id}/"
+        )
+        record = response.data[0]
+        self.assertIn("product_name", record)
+        self.assertIn("product_sku", record)
+        self.assertIn("location_name", record)

@@ -76,3 +76,31 @@ class Supplier(models.Model):
 
     def __str__(self):
         return f"{self.code} — {self.name}"
+
+
+class Inventory(models.Model):
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        related_name="inventory_records",
+    )
+    location = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+        related_name="inventory_records",
+    )
+    quantity = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name_plural = "inventory"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["product", "location"],
+                name="unique_product_location",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.product.sku} @ {self.location.name}: {self.quantity}"

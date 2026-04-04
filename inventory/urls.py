@@ -5,6 +5,7 @@ from inventory.views import (
     ProductViewSet,
     LocationViewSet,
     SupplierViewSet,
+    InventoryViewSet,
 )
 
 router = DefaultRouter()
@@ -12,6 +13,7 @@ router.register(r"categories", CategoryViewSet)
 router.register(r"products", ProductViewSet)
 router.register(r"locations", LocationViewSet)
 router.register(r"suppliers", SupplierViewSet)
+router.register(r"inventory", InventoryViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
